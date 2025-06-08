@@ -82,10 +82,11 @@ class BacktestRunner:
                         'entry_balance': self.current_balance
                     }
                     
-                    # Update balance
-                    self.current_balance -= position_size * current_price
+                    # Update balance (subtract only the cost of the position)
+                    position_cost = position_size * current_price
+                    self.current_balance -= position_cost
                     
-                    logger.info(f"Backtest Entry: {reason} at {current_price}")
+                    logger.info(f"Backtest Entry: {reason} at {current_price} (Position Size: {position_size:.8f} BTC, Cost: ${position_cost:.2f})")
             
             # Check for exit
             elif self.position:

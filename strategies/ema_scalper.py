@@ -187,7 +187,11 @@ class EMARSIScalper:
     
     def calculate_position_size(self, balance: float, current_price: float) -> float:
         """Calculate position size based on risk management rules."""
-        return min(balance * self.config.max_position_size, balance)
+        # Calculate how much of our balance we want to use
+        position_value = balance * self.config.max_position_size
+        # Calculate how many units we can buy with that value
+        units = position_value / current_price
+        return units
     
     def execute_trade(self, symbol: str, side: str, amount: float, price: float, mode: str = 'dry-run') -> Dict:
         """Execute a trade (real or simulated)."""
