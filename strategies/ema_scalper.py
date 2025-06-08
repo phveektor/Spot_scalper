@@ -192,7 +192,7 @@ class EMARSIScalper:
     def execute_trade(self, symbol: str, side: str, amount: float, price: float, mode: str = 'dry-run') -> Dict:
         """Execute a trade (real or simulated)."""
         trade = {
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(),
             'symbol': symbol,
             'side': side,
             'amount': amount,
@@ -262,7 +262,7 @@ class EMARSIScalper:
                     should_exit, reason = self.should_exit(
                         df, 
                         self.current_position['price'],
-                        pd.to_datetime(self.current_position['timestamp'])
+                        self.current_position['timestamp']
                     )
                     if should_exit:
                         try:
