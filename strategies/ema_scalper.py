@@ -6,7 +6,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 
 load_dotenv()
@@ -38,6 +38,10 @@ class StrategyConfig:
     
     # Position Sizing
     max_position_size: float = 0.1  # 10% of available balance
+    
+    # Trade Management
+    max_holding_time: int = 30  # Maximum holding time in minutes
+    min_holding_time: int = 5   # Minimum holding time in minutes
 
 class EMARSIScalper:
     def __init__(self, config: Optional[StrategyConfig] = None):
@@ -136,16 +140,28 @@ class EMARSIScalper:
             
         return True, "All conditions met"
     
-    def should_exit(self, df: pd.DataFrame, entry_price: float) -> Tuple[bool, str]:
+    def should_exit(self, df: pd.DataFrame, entry_price: float, entry_time: datetime) -> Tuple[bool, str]:
         """Determine if we should exit the current position."""
         if not self.current_position:
             return False, "No position"
             
         current = df.iloc[-1]
         current_price = current['close']
+        current_time = current['timestamp']
+        
+        # Calculate holding time
+        holding_time = (current_time - entry_time).total_seconds() / 60  # in minutes
         
         # Calculate PnL
         pnl_pct = ((current_price - entry_price) / entry_price) * 100
+        
+        # Force exit if holding time exceeds maximum
+        if holding_time >= self.config.max_holding_time:
+            return True, f"Max holding time reached: {holding_time:.1f} minutes"
+        
+        # Don't exit before minimum holding time unless stop loss is hit
+        if holding_time < self.config.min_holding_time and pnl_pct > -self.config.stop_loss_pct:
+            return False, f"Minimum holding time not reached: {holding_time:.1f} minutes"
         
         # Take profit
         if pnl_pct >= self.config.take_profit_pct:
@@ -161,10 +177,11 @@ class EMARSIScalper:
             if current_price < trailing_stop_price:
                 return True, f"Trailing stop hit: {pnl_pct:.2f}%"
                 
-        # EMA cross exit
-        if (df['ema_fast'].iloc[-2] >= df['ema_slow'].iloc[-2] and 
-            df['ema_fast'].iloc[-1] < df['ema_slow'].iloc[-1]):
-            return True, "EMA cross exit"
+        # EMA cross exit (only after minimum holding time)
+        if holding_time >= self.config.min_holding_time:
+            if (df['ema_fast'].iloc[-2] >= df['ema_slow'].iloc[-2] and 
+                df['ema_fast'].iloc[-1] < df['ema_slow'].iloc[-1]):
+                return True, "EMA cross exit"
             
         return False, "Holding position"
     
@@ -214,6 +231,7 @@ class EMARSIScalper:
                 # Fetch latest candles
                 ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=300)
                 df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
                 
                 # Calculate indicators
                 df = self.calculate_indicators(df)
@@ -233,13 +251,19 @@ class EMARSIScalper:
                                 price=df['close'].iloc[-1],
                                 mode=mode
                             )
+                            if self.current_position:
+                                self.current_position['entry_time'] = df['timestamp'].iloc[-1]
                             logger.info(f"Entered position: {reason}")
                         except Exception as e:
                             if self._handle_api_error(e):
                                 continue
                             logger.error(f"Failed to enter position: {str(e)}")
                 else:
-                    should_exit, reason = self.should_exit(df, self.current_position['price'])
+                    should_exit, reason = self.should_exit(
+                        df, 
+                        self.current_position['price'],
+                        self.current_position['entry_time']
+                    )
                     if should_exit:
                         try:
                             self.execute_trade(
