@@ -89,7 +89,11 @@ class BacktestRunner:
             
             # Check for exit
             elif self.position:
-                should_exit, reason = self.strategy.should_exit(current_data, self.position['entry_price'])
+                should_exit, reason = self.strategy.should_exit(
+                    current_data, 
+                    self.position['entry_price'],
+                    self.position['entry_time']
+                )
                 if should_exit:
                     # Calculate exit value and PnL
                     exit_value = self.position['amount'] * current_price
