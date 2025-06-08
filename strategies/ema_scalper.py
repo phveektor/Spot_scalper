@@ -262,7 +262,7 @@ class EMARSIScalper:
                     should_exit, reason = self.should_exit(
                         df, 
                         self.current_position['price'],
-                        self.current_position['entry_time']
+                        pd.to_datetime(self.current_position['timestamp'])
                     )
                     if should_exit:
                         try:
