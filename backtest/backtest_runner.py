@@ -121,6 +121,34 @@ class BacktestRunner:
                     logger.info(f"Backtest Exit: {reason} at {current_price} (PnL: {pnl_pct:.2f}%)")
                     self.position = None
         
+        # Close any remaining position at the end of backtest
+        if self.position:
+            current_price = df.iloc[-1]['close']
+            exit_value = self.position['amount'] * current_price
+            pnl = exit_value - (self.position['amount'] * self.position['entry_price'])
+            pnl_pct = (pnl / (self.position['amount'] * self.position['entry_price'])) * 100
+            
+            # Update balance
+            self.current_balance += exit_value
+            
+            # Record trade
+            trade = {
+                'entry_time': self.position['entry_time'],
+                'exit_time': df.iloc[-1]['timestamp'],
+                'entry_price': self.position['entry_price'],
+                'exit_price': current_price,
+                'amount': self.position['amount'],
+                'pnl': pnl,
+                'pnl_pct': pnl_pct,
+                'reason': 'Backtest period ended',
+                'entry_balance': self.position['entry_balance'],
+                'exit_balance': self.current_balance
+            }
+            trades.append(trade)
+            
+            logger.info(f"Backtest Exit: Backtest period ended at {current_price} (PnL: {pnl_pct:.2f}%)")
+            self.position = None
+        
         # Calculate and log metrics
         self.calculate_metrics(trades)
         
