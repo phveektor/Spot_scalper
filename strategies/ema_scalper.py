@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
+import time
 
 load_dotenv()
 
@@ -41,14 +42,54 @@ class StrategyConfig:
 class EMARSIScalper:
     def __init__(self, config: Optional[StrategyConfig] = None):
         self.config = config or StrategyConfig()
-        self.exchange = ccxt.bybit({
-            'apiKey': os.getenv('BYBIT_API_KEY'),
-            'secret': os.getenv('BYBIT_API_SECRET'),
-            'enableRateLimit': True
-        })
+        self.exchange = self._initialize_exchange()
         self.current_position = None
         self.trade_history = []
+        self.retry_count = 0
+        self.max_retries = 3
+        self.retry_delay = 5  # seconds
         
+    def _initialize_exchange(self) -> ccxt.Exchange:
+        """Initialize exchange with proper configuration."""
+        exchange = ccxt.bybit({
+            'apiKey': os.getenv('BYBIT_API_KEY'),
+            'secret': os.getenv('BYBIT_API_SECRET'),
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'spot',
+                'adjustForTimeDifference': True,
+                'recvWindow': 5000
+            }
+        })
+        
+        # Set exchange-specific options
+        exchange.options['defaultType'] = 'spot'
+        exchange.options['adjustForTimeDifference'] = True
+        exchange.options['recvWindow'] = 5000
+        
+        return exchange
+    
+    def _handle_api_error(self, error: Exception) -> bool:
+        """Handle API errors and determine if retry is needed."""
+        error_msg = str(error)
+        
+        # Log the error
+        logger.error(f"API Error: {error_msg}")
+        
+        # Check if error is retryable
+        if "403" in error_msg or "429" in error_msg:
+            if self.retry_count < self.max_retries:
+                self.retry_count += 1
+                logger.warning(f"Retrying in {self.retry_delay} seconds... (Attempt {self.retry_count}/{self.max_retries})")
+                time.sleep(self.retry_delay)
+                return True
+            else:
+                logger.error("Max retries reached. Please check your API credentials and region access.")
+                return False
+        else:
+            logger.error(f"Non-retryable error: {error_msg}")
+            return False
+
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate all technical indicators needed for the strategy."""
         # EMAs
@@ -154,6 +195,8 @@ class EMARSIScalper:
                 trade['order_id'] = order['id']
                 logger.info(f"Executed {side} order: {amount} {symbol} at {price}")
             except Exception as e:
+                if self._handle_api_error(e):
+                    return self.execute_trade(symbol, side, amount, price, mode)
                 logger.error(f"Trade execution failed: {str(e)}")
                 return None
         else:
@@ -179,36 +222,51 @@ class EMARSIScalper:
                 if not self.current_position:
                     should_enter, reason = self.should_enter(df)
                     if should_enter:
-                        balance = float(self.exchange.fetch_balance()['USDT']['free'])
-                        position_size = self.calculate_position_size(balance, df['close'].iloc[-1])
-                        
-                        self.current_position = self.execute_trade(
-                            symbol=symbol,
-                            side='buy',
-                            amount=position_size,
-                            price=df['close'].iloc[-1],
-                            mode=mode
-                        )
-                        logger.info(f"Entered position: {reason}")
+                        try:
+                            balance = float(self.exchange.fetch_balance()['USDT']['free'])
+                            position_size = self.calculate_position_size(balance, df['close'].iloc[-1])
+                            
+                            self.current_position = self.execute_trade(
+                                symbol=symbol,
+                                side='buy',
+                                amount=position_size,
+                                price=df['close'].iloc[-1],
+                                mode=mode
+                            )
+                            logger.info(f"Entered position: {reason}")
+                        except Exception as e:
+                            if self._handle_api_error(e):
+                                continue
+                            logger.error(f"Failed to enter position: {str(e)}")
                 else:
                     should_exit, reason = self.should_exit(df, self.current_position['price'])
                     if should_exit:
-                        self.execute_trade(
-                            symbol=symbol,
-                            side='sell',
-                            amount=self.current_position['amount'],
-                            price=df['close'].iloc[-1],
-                            mode=mode
-                        )
-                        logger.info(f"Exited position: {reason}")
-                        self.current_position = None
+                        try:
+                            self.execute_trade(
+                                symbol=symbol,
+                                side='sell',
+                                amount=self.current_position['amount'],
+                                price=df['close'].iloc[-1],
+                                mode=mode
+                            )
+                            logger.info(f"Exited position: {reason}")
+                            self.current_position = None
+                        except Exception as e:
+                            if self._handle_api_error(e):
+                                continue
+                            logger.error(f"Failed to exit position: {str(e)}")
                 
                 # Log performance metrics
                 if len(self.trade_history) > 0:
                     self.log_performance_metrics()
                 
+                # Reset retry count on successful iteration
+                self.retry_count = 0
+                
             except Exception as e:
-                logger.error(f"Strategy error: {str(e)}")
+                if not self._handle_api_error(e):
+                    logger.error(f"Strategy error: {str(e)}")
+                    break
                 continue
     
     def log_performance_metrics(self):
