@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: spot-scalper-bot
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1" 
