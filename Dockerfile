@@ -17,5 +17,5 @@ COPY . .
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 
-# Run the bot
-CMD ["python", "main.py"] 
+# Run the bot with environment variables
+CMD ["python", "main.py", "run", "--mode", "${TRADING_MODE}", "--symbol", "${TRADING_SYMBOL}", "--timeframe", "${TRADING_TIMEFRAME}"] 

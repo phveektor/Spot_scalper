@@ -1,11 +1,16 @@
 services:
-  - type: web
+  - type: worker
     name: spot-scalper-bot
     env: docker
     plan: free
     dockerfilePath: ./Dockerfile
-    healthCheckPath: /
     autoDeploy: true
     envVars:
       - key: PYTHONUNBUFFERED
-        value: "1" 
+        value: "1"
+      - key: TRADING_MODE
+        value: "dry-run"
+      - key: TRADING_SYMBOL
+        value: "BTC/USDT"
+      - key: TRADING_TIMEFRAME
+        value: "1m" 
